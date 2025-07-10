@@ -19,6 +19,9 @@
 			authCodeInput.focus();
 		}
 
+		// Handle email resend timer
+		initEmailResendTimer();
+
 		// Handle backup code toggle
 		var backupToggle = document.querySelector(".backup-code-toggle-link");
 		if (backupToggle) {
@@ -78,8 +81,44 @@
 		});
 	}
 
+	function initEmailResendTimer() {
+		var resendButton = document.querySelector(
+			'.two-factor-email-resend input[name="two-factor-email-code-resend"]'
+		);
+
+		if (resendButton) {
+			// Add disabled attribute and class
+			resendButton.disabled = true;
+			resendButton.classList.add("disabled");
+
+			// Store original button text
+			var originalText = resendButton.value;
+
+			// Start 5-minute (300 seconds) countdown
+			var timeLeft = 300;
+
+			var timer = setInterval(function () {
+				var minutes = Math.floor(timeLeft / 60);
+				var seconds = timeLeft % 60;
+
+				// Format time display
+				var timeDisplay = minutes + ":" + (seconds < 10 ? "0" : "") + seconds;
+				resendButton.value = "Resend Code (" + timeDisplay + ")";
+
+				timeLeft--;
+
+				// When timer expires
+				if (timeLeft < 0) {
+					clearInterval(timer);
+					resendButton.disabled = false;
+					resendButton.classList.remove("disabled");
+					resendButton.value = originalText;
+				}
+			}, 1000);
+		}
+	}
+
 	function toggleBackupCode() {
-		console.log("Toggling backup code form visibility");
 		var backupForm = document.getElementById("backup-code-form");
 		var toggle = document.querySelector(".backup-code-toggle-link");
 

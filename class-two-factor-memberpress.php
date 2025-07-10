@@ -75,9 +75,95 @@ class Two_Factor_MemberPress {
 		// Enqueue scripts and styles
 		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_frontend_assets' ) );
 		
+		// Add to init() method
+		add_action( 'init', array( __CLASS__, 'debug_frontend_2fa_login' ), 5 ); // Priority 5 to run early
+		
 		// Hook into all login attempts for debugging
 		add_action( 'wp_authenticate', array( __CLASS__, 'debug_login_attempt' ), 1, 2 );
 		add_action( 'authenticate', array( __CLASS__, 'debug_authenticate' ), 1, 3 );
+
+		// debug email
+		add_action( 'wp_mail', array( __CLASS__, 'debug_wp_mail' ), 10, 1 );
+    	add_action( 'wp_mail_failed', array( __CLASS__, 'debug_wp_mail_failed' ), 10, 1 );
+	}
+
+	/**
+	 * Debug frontend 2FA login handling
+	 */
+	public static function debug_frontend_2fa_login() {
+		if ( ! isset( $_GET['two_factor_login'] ) ) {
+			return;
+		}
+		
+		error_log( '=== Frontend 2FA Login Debug ===' );
+		error_log( 'GET parameters: ' . print_r( $_GET, true ) );
+		error_log( 'POST parameters: ' . print_r( $_POST, true ) );
+		error_log( 'SESSION data: ' . print_r( $_SESSION, true ) );
+		
+		// Check if provider switching is being handled
+		if ( isset( $_GET['provider'] ) ) {
+			error_log( 'Provider switching detected: ' . $_GET['provider'] );
+			
+			// Check if this provider exists
+			$providers = Two_Factor_Core::get_providers();
+			if ( isset( $providers[ $_GET['provider'] ] ) ) {
+				error_log( 'Provider exists and is available' );
+				$provider = $providers[ $_GET['provider'] ];
+				error_log( 'Provider class: ' . get_class( $provider ) );
+				error_log( 'Provider label: ' . $provider->get_label() );
+			} else {
+				error_log( 'ERROR: Provider not found in available providers' );
+				error_log( 'Available providers: ' . print_r( array_keys( $providers ), true ) );
+			}
+		}
+		
+		// Check if user is in session
+		if ( isset( $_SESSION['two_factor_login_user_id'] ) ) {
+			$user_id = $_SESSION['two_factor_login_user_id'];
+			error_log( 'User in session: ' . $user_id );
+			
+			$user = get_user_by( 'id', $user_id );
+			if ( $user ) {
+				error_log( 'User email: ' . $user->user_email );
+				
+				// Check enabled providers for this user
+				$enabled_providers = Two_Factor_Core::get_enabled_providers_for_user( $user );
+				error_log( 'Enabled providers for user: ' . print_r( array_keys( $enabled_providers ), true ) );
+			}
+		} else {
+			error_log( 'ERROR: No user in session for 2FA login' );
+		}
+	}
+
+	/**
+	 * Debug wp_mail function calls with more detail
+	 */
+	public static function debug_wp_mail( $mail_data ) {
+		// Check if this is a 2FA email
+		$subject = isset( $mail_data['subject'] ) ? $mail_data['subject'] : '';
+		$to = isset( $mail_data['to'] ) ? $mail_data['to'] : '';
+		$message = isset( $mail_data['message'] ) ? $mail_data['message'] : '';
+		
+		error_log( '=== wp_mail DEBUG ===' );
+		error_log( 'To: ' . $to );
+		error_log( 'Subject: ' . $subject );
+		error_log( 'Message length: ' . strlen( $message ) );
+		error_log( 'Full mail data: ' . print_r( $mail_data, true ) );
+		
+		// Check if this looks like a 2FA email
+		if ( strpos( $subject, 'verification' ) !== false || strpos( $subject, 'code' ) !== false || strpos( $message, 'verification' ) !== false ) {
+			error_log( '*** This appears to be a 2FA email ***' );
+			error_log( 'Message content: ' . $message );
+		}
+		
+		return $mail_data;
+	}
+
+	/**
+	 * Debug wp_mail failures
+	 */
+	public static function debug_wp_mail_failed( $wp_error ) {
+		error_log( 'wp_mail failed: ' . $wp_error->get_error_message() );
 	}
 	
 	/**
@@ -765,7 +851,6 @@ class Two_Factor_MemberPress {
 		$user = self::get_stored_user_for_2fa_login();
 		if ( ! $user ) {
 			error_log( 'No stored user found for 2FA login, redirecting to home' );
-			// Instead of dying, redirect back to login with an error
 			wp_redirect( add_query_arg( array(
 				'error' => 'session_expired',
 				'message' => urlencode( 'Your session has expired. Please log in again.' )
@@ -785,11 +870,47 @@ class Two_Factor_MemberPress {
 		
 		error_log( 'Available providers: ' . print_r( array_keys( $available_providers ), true ) );
 		error_log( 'Primary provider: ' . ( $primary_provider ? get_class( $primary_provider ) : 'None' ) );
+		error_log( 'Requested provider from URL: ' . $provider_class );
 		
 		if ( $provider_class && isset( $available_providers[ $provider_class ] ) ) {
 			$provider = $available_providers[ $provider_class ];
+			error_log( 'Using requested provider: ' . get_class( $provider ) );
 		} else {
 			$provider = $primary_provider;
+			error_log( 'Using primary provider: ' . ( $provider ? get_class( $provider ) : 'None' ) );
+		}
+		
+		// **EMAIL PROVIDER SPECIFIC DEBUGGING AND TRIGGER**
+		if ( $provider && get_class( $provider ) === 'Two_Factor_Email' ) {
+			error_log( 'Email provider selected, attempting to send email' );
+			
+			// Check if this is the first time loading the email provider
+			if ( ! session_id() ) {
+				session_start();
+			}
+			
+			$email_sent_key = 'email_2fa_sent_' . $user->ID;
+			$email_already_sent = isset( $_SESSION[ $email_sent_key ] ) && ( time() - $_SESSION[ $email_sent_key ] ) < 300; // 5 minutes
+			
+			error_log( 'Email already sent recently: ' . ( $email_already_sent ? 'Yes' : 'No' ) );
+			
+			if ( ! $email_already_sent ) {
+				error_log( 'Calling generate_and_email_token for user: ' . $user->user_email );
+				
+				// This is the method that should send the email
+				$email_result = $provider->generate_and_email_token( $user );
+				
+				error_log( 'generate_and_email_token result: ' . ( $email_result ? 'SUCCESS' : 'FAILED' ) );
+				
+				if ( $email_result ) {
+					$_SESSION[ $email_sent_key ] = time();
+					error_log( 'Marked email as sent at: ' . date( 'Y-m-d H:i:s' ) );
+				} else {
+					error_log( 'ERROR: Failed to send 2FA email to ' . $user->user_email );
+				}
+			} else {
+				error_log( 'Email was already sent recently, skipping send' );
+			}
 		}
 		
 		// Check for backup codes availability
@@ -811,6 +932,12 @@ class Two_Factor_MemberPress {
 		
 		error_log( 'Displaying 2FA login page with provider: ' . ( $provider ? get_class( $provider ) : 'None' ) );
 		error_log( 'Backup codes available: ' . ( $backup_available ? 'Yes' : 'No' ) );
+		
+		// **MAKE THESE VARIABLES AVAILABLE TO THE TEMPLATE**
+		// Set variables that the template expects
+		$login_nonce = array( 'key' => $login_nonce );
+		$interim_login = false; // Set based on your needs
+		$rememberme = ! empty( $_POST['rememberme'] );
 		
 		// Display the login page
 		include_once TWO_FACTOR_DIR . 'templates/two-factor-login-frontend.php';
