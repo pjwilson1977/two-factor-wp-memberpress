@@ -145,16 +145,35 @@ function render_verify_step( $user ) {
  * Render backup codes step
  */
 function render_backup_codes_step( $user ) {
-	// Get backup codes for the user
-	$providers = Two_Factor_Core::get_providers();
-	$backup_codes = array();
+	// Get backup codes for the user from session (they were generated in previous step)
+	if ( ! session_id() ) {
+		session_start();
+	}
 	
-	if ( isset( $providers['Two_Factor_Backup_Codes'] ) ) {
-		$backup_provider = $providers['Two_Factor_Backup_Codes'];
-		$backup_codes = $backup_provider->get_codes( $user );
-		
-		if ( empty( $backup_codes ) ) {
-			$backup_codes = $backup_provider->generate_codes( $user );
+	$backup_codes = array();
+	if ( isset( $_SESSION['two_factor_backup_codes'] ) ) {
+		$backup_codes = $_SESSION['two_factor_backup_codes'];
+		// Clear them from session after displaying
+		unset( $_SESSION['two_factor_backup_codes'] );
+	}
+	
+	// If no codes in session, they may have been generated already
+	if ( empty( $backup_codes ) ) {
+		$providers = Two_Factor_Core::get_providers();
+		if ( isset( $providers['Two_Factor_Backup_Codes'] ) ) {
+			$backup_provider = $providers['Two_Factor_Backup_Codes'];
+			// Check if user has backup codes already
+			$codes_count = $backup_provider::codes_remaining_for_user( $user );
+			if ( $codes_count == 0 ) {
+				// Generate new codes if none exist
+				$backup_codes = $backup_provider->generate_codes( $user );
+				// Store in session immediately
+				$_SESSION['two_factor_backup_codes'] = $backup_codes;
+			} else {
+				// User already has backup codes but they're not in session
+				// This means they were already generated and can't be displayed again
+				$codes_already_exist = true;
+			}
 		}
 	}
 	?>
@@ -183,6 +202,11 @@ function render_backup_codes_step( $user ) {
 					<?php _e( 'Download Codes', 'two-factor' ); ?>
 				</button>
 			</div>
+		<?php elseif ( isset( $codes_already_exist ) && $codes_already_exist ): ?>
+			<div class="two-factor-message info">
+				<p><?php _e( 'Backup codes have already been generated for your account. For security reasons, they can only be displayed once when first created.', 'two-factor' ); ?></p>
+				<p><?php _e( 'If you need new backup codes, you can generate them from your user profile settings.', 'two-factor' ); ?></p>
+			</div>
 		<?php else: ?>
 			<div class="two-factor-message error">
 				<p><?php _e( 'Unable to generate backup codes. You can generate them later from your profile.', 'two-factor' ); ?></p>
@@ -193,12 +217,21 @@ function render_backup_codes_step( $user ) {
 			<?php wp_nonce_field( 'two_factor_setup_backup', '_wpnonce' ); ?>
 			<input type="hidden" name="backup_codes_acknowledged" value="1" />
 			
-			<div class="form-field">
-				<label>
-					<input type="checkbox" name="codes_saved" required />
-					<?php _e( 'I have saved these backup codes in a secure location', 'two-factor' ); ?>
-				</label>
-			</div>
+			<?php if ( ! empty( $backup_codes ) ): ?>
+				<div class="form-field">
+					<label>
+						<input type="checkbox" name="codes_saved" required />
+						<?php _e( 'I have saved these backup codes in a secure location', 'two-factor' ); ?>
+					</label>
+				</div>
+			<?php elseif ( isset( $codes_already_exist ) && $codes_already_exist ): ?>
+				<div class="form-field">
+					<label>
+						<input type="checkbox" name="codes_acknowledged" required />
+						<?php _e( 'I understand that backup codes have been generated for my account', 'two-factor' ); ?>
+					</label>
+				</div>
+			<?php endif; ?>
 			
 			<p>
 				<input type="submit" 
@@ -208,6 +241,7 @@ function render_backup_codes_step( $user ) {
 		</form>
 	</div>
 
+	<?php if ( ! empty( $backup_codes ) ): ?>
 	<script>
 	function copyBackupCodes() {
 		const codes = <?php echo json_encode( $backup_codes ); ?>;
@@ -243,6 +277,7 @@ function render_backup_codes_step( $user ) {
 		URL.revokeObjectURL(url);
 	}
 	</script>
+	<?php endif; ?>
 	<?php
 }
 

@@ -69,6 +69,9 @@ class Two_Factor_MemberPress {
 		// Handle frontend 2FA validation
 		add_action( 'init', array( __CLASS__, 'handle_frontend_2fa_validation' ) );
 		
+		// Temporary admin function for testing
+		add_action( 'admin_init', array( __CLASS__, 'reset_user_2fa_for_testing' ) );
+		
 		// Enqueue scripts and styles
 		add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_frontend_assets' ) );
 		
@@ -510,14 +513,36 @@ class Two_Factor_MemberPress {
 				update_user_meta( $user->ID, Two_Factor_Core::PROVIDER_USER_META_KEY, 'Two_Factor_Totp' );
 				error_log( 'Set TOTP as primary provider for user ' . $user->ID );
 				
-				// Generate backup codes if provider exists
+				// Generate backup codes and enable backup codes provider
 				$providers = Two_Factor_Core::get_providers();
 				if ( isset( $providers['Two_Factor_Backup_Codes'] ) ) {
 					$backup_provider = $providers['Two_Factor_Backup_Codes'];
+					
+					// Enable backup codes provider for user
+					Two_Factor_Core::enable_provider_for_user( $user->ID, 'Two_Factor_Backup_Codes' );
+					error_log( 'Enabled backup codes provider for user ' . $user->ID );
+					
+					// Generate backup codes
 					$backup_codes = $backup_provider->generate_codes( $user );
 					error_log( 'Generated backup codes for user ' . $user->ID . ': ' . count( $backup_codes ) . ' codes' );
+					
+					// Store backup codes in session so they can be displayed to the user
+					if ( ! session_id() ) {
+						session_start();
+					}
+					$_SESSION['two_factor_backup_codes'] = $backup_codes;
+					error_log( 'Stored backup codes in session for display' );
 				} else {
 					error_log( 'Backup codes provider not available' );
+				}
+				
+				// Enable email 2FA as backup method if it's available and allowed
+				$settings = self::get_settings();
+				$allowed_providers = isset( $settings['allowed_providers'] ) ? $settings['allowed_providers'] : array_keys( Two_Factor_Core::get_providers() );
+				
+				if ( isset( $providers['Two_Factor_Email'] ) && in_array( 'Two_Factor_Email', $allowed_providers ) ) {
+					Two_Factor_Core::enable_provider_for_user( $user->ID, 'Two_Factor_Email' );
+					error_log( 'Enabled email 2FA provider for user ' . $user->ID );
 				}
 				
 				error_log( 'Redirecting to backup codes step' );
@@ -636,7 +661,15 @@ class Two_Factor_MemberPress {
 			}
 			
 			// Generate backup codes
-			$backup_provider->generate_codes( $user );
+			$backup_codes = $backup_provider->generate_codes( $user );
+			
+			// Store backup codes in session for display
+			if ( ! session_id() ) {
+				session_start();
+			}
+			$_SESSION['two_factor_backup_codes'] = $backup_codes;
+			
+			error_log( 'Generated backup codes for user ' . $user->ID . ': ' . count( $backup_codes ) . ' codes' );
 		}
 	}
 
@@ -742,6 +775,9 @@ class Two_Factor_MemberPress {
 		
 		error_log( 'Found stored user for 2FA login: ' . $user->user_login . ' (ID: ' . $user->ID . ')' );
 		
+		// Ensure backup codes are enabled for users who have TOTP
+		self::ensure_backup_codes_enabled_for_user( $user );
+		
 		// Get provider from URL or use primary
 		$provider_class = isset( $_GET['provider'] ) ? sanitize_text_field( $_GET['provider'] ) : null;
 		$available_providers = Two_Factor_Core::get_available_providers_for_user( $user );
@@ -774,6 +810,7 @@ class Two_Factor_MemberPress {
 		$error_msg = isset( $_GET['error'] ) ? self::get_error_message( $_GET['error'] ) : '';
 		
 		error_log( 'Displaying 2FA login page with provider: ' . ( $provider ? get_class( $provider ) : 'None' ) );
+		error_log( 'Backup codes available: ' . ( $backup_available ? 'Yes' : 'No' ) );
 		
 		// Display the login page
 		include_once TWO_FACTOR_DIR . 'templates/two-factor-login-frontend.php';
@@ -1032,6 +1069,37 @@ class Two_Factor_MemberPress {
 	}
 
 	/**
+	 * Temporary function to reset user's 2FA for testing
+	 * Add this to admin_init hook for testing
+	 */
+	public static function reset_user_2fa_for_testing() {
+		// Only allow this for administrators and only when ?reset_2fa=1 is in URL
+		if ( ! current_user_can( 'manage_options' ) || ! isset( $_GET['reset_2fa'] ) ) {
+			return;
+		}
+		
+		$user_id = get_current_user_id();
+		if ( $user_id ) {
+			// Clear all 2FA settings
+			delete_user_meta( $user_id, Two_Factor_Core::ENABLED_PROVIDERS_USER_META_KEY );
+			delete_user_meta( $user_id, Two_Factor_Core::PROVIDER_USER_META_KEY );
+			delete_user_meta( $user_id, Two_Factor_Totp::SECRET_META_KEY );
+			delete_user_meta( $user_id, Two_Factor_Backup_Codes::BACKUP_CODES_META_KEY );
+			delete_user_meta( $user_id, self::USER_2FA_SETUP_FORCED_KEY );
+			
+			// Mark user as needing 2FA setup
+			update_user_meta( $user_id, self::USER_NEEDS_2FA_SETUP_KEY, true );
+			
+			// Clear sessions
+			self::clear_stored_user_for_2fa_setup();
+			self::clear_stored_user_for_2fa_login();
+			
+			wp_redirect( admin_url( '?2fa_reset=success' ) );
+			exit;
+		}
+	}
+
+	/**
 	 * Force 2FA setup for all existing users
 	 */
 	private static function force_2fa_setup_for_all_users() {
@@ -1167,6 +1235,51 @@ class Two_Factor_MemberPress {
 		if ( isset( $settings['force_2fa'] ) && $settings['force_2fa'] && ! $has_2fa && empty( $needs_setup ) ) {
 			self::mark_user_needs_2fa_setup( $user_id );
 			error_log( "Marked user $user_id as needing 2FA setup" );
+		}
+	}
+
+	/**
+	 * Ensure backup codes and email 2FA are enabled for users who have TOTP
+	 *
+	 * @param WP_User $user User object
+	 */
+	private static function ensure_backup_codes_enabled_for_user( $user ) {
+		// Check if user has TOTP enabled but not backup codes or email
+		$enabled_providers = Two_Factor_Core::get_enabled_providers_for_user( $user );
+		$has_totp = array_key_exists( 'Two_Factor_Totp', $enabled_providers );
+		$has_backup_codes = array_key_exists( 'Two_Factor_Backup_Codes', $enabled_providers );
+		$has_email = array_key_exists( 'Two_Factor_Email', $enabled_providers );
+		
+		$settings = self::get_settings();
+		$allowed_providers = isset( $settings['allowed_providers'] ) ? $settings['allowed_providers'] : array_keys( Two_Factor_Core::get_providers() );
+		$providers = Two_Factor_Core::get_providers();
+		
+		if ( $has_totp && ! $has_backup_codes && isset( $providers['Two_Factor_Backup_Codes'] ) ) {
+			error_log( 'User ' . $user->ID . ' has TOTP but no backup codes, enabling backup codes' );
+			
+			// Enable backup codes provider
+			Two_Factor_Core::enable_provider_for_user( $user->ID, 'Two_Factor_Backup_Codes' );
+			
+			// Generate backup codes if they don't exist
+			$backup_provider = $providers['Two_Factor_Backup_Codes'];
+			$existing_codes_count = $backup_provider::codes_remaining_for_user( $user );
+			
+			if ( $existing_codes_count == 0 ) {
+				$backup_codes = $backup_provider->generate_codes( $user );
+				error_log( 'Generated backup codes for existing user ' . $user->ID . ': ' . count( $backup_codes ) . ' codes' );
+				
+				// Store backup codes in session for display
+				if ( ! session_id() ) {
+					session_start();
+				}
+				$_SESSION['two_factor_backup_codes'] = $backup_codes;
+				error_log( 'Stored backup codes in session for existing user display' );
+			}
+		}
+		
+		if ( $has_totp && ! $has_email && isset( $providers['Two_Factor_Email'] ) && in_array( 'Two_Factor_Email', $allowed_providers ) ) {
+			error_log( 'User ' . $user->ID . ' has TOTP but no email 2FA, enabling email 2FA' );
+			Two_Factor_Core::enable_provider_for_user( $user->ID, 'Two_Factor_Email' );
 		}
 	}
 }

@@ -110,6 +110,27 @@
 		.backup-code-input.show {
 			display: block;
 		}
+		
+		/* Style the provider's submit button */
+		.form-field .submit .button,
+		.form-field .submit input[type="submit"] {
+			background: #0073aa;
+			color: white;
+			padding: 12px 24px;
+			border: none;
+			border-radius: 4px;
+			cursor: pointer;
+			font-size: 16px;
+			text-decoration: none;
+			display: inline-block;
+			width: 100%;
+			box-sizing: border-box;
+		}
+		
+		.form-field .submit .button:hover,
+		.form-field .submit input[type="submit"]:hover {
+			background: #005a87;
+		}
 	</style>
 </head>
 <body>
@@ -141,8 +162,6 @@
 				<label for="authcode"><?php echo esc_html( $provider->get_label() ); ?></label>
 				<?php $provider->authentication_page( $user ); ?>
 			</div>
-
-			<button type="submit" class="btn"><?php _e( 'Verify', 'two-factor' ); ?></button>
 		</form>
 		<?php endif; ?>
 
