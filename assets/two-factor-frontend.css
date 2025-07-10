@@ -97,27 +97,27 @@
 
 /* Error and success messages */
 .two-factor-message {
-	padding: 12px;
-	border-radius: 4px;
-	margin-bottom: 20px;
-}
-
-.two-factor-message.error {
-	background: #f8d7da;
-	color: #721c24;
-	border: 1px solid #f5c6cb;
+    padding: 10px;
+    border-radius: 4px;
+    margin-bottom: 15px;
 }
 
 .two-factor-message.success {
-	background: #d4edda;
-	color: #155724;
-	border: 1px solid #c3e6cb;
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
 }
 
-.two-factor-message.warning {
-	background: #fff3cd;
-	color: #856404;
-	border: 1px solid #ffeaa7;
+.two-factor-message.error {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+
+.two-factor-message.info {
+    background: #d1ecf1;
+    border: 1px solid #bee5eb;
+    color: #0c5460;
 }
 
 /* Progress indicator */
@@ -198,6 +198,80 @@
 	break-inside: avoid;
 }
 
+/* Backup code form styling */
+.backup-code-input {
+    display: none;
+    margin-top: 15px;
+    padding: 15px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    animation: slideDown 0.3s ease-out;
+}
+
+.backup-code-input.show {
+    display: block;
+}
+
+.backup-code-toggle-link {
+    color: #007cba;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.backup-code-toggle-link:hover {
+    text-decoration: underline;
+}
+
+/* Animation for backup code form */
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        padding: 0 15px;
+    }
+    to {
+        opacity: 1;
+        max-height: 200px;
+        padding: 15px;
+    }
+}
+
+.backup-code-input .form-field {
+    margin-bottom: 15px;
+}
+
+.backup-code-input .form-field label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 600;
+}
+
+.backup-code-input .form-field input[type="text"] {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.backup-code-input .btn {
+    background: #0073aa;
+    color: white;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.backup-code-input .btn:hover {
+    background: #005a87;
+}
+
 /* Provider options */
 .two-factor-provider-options {
 	margin-top: 20px;
@@ -235,6 +309,29 @@
 .two-factor-provider-list a:hover {
 	background: #f0f0f0;
 	color: #333;
+}
+
+/* Special styling for backup code provider in the list */
+.provider-list .backup-code-provider {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background: #f9f9f9;
+    margin-bottom: 10px;
+}
+
+.provider-list .backup-code-provider > a {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    margin: 0;
+}
+
+.provider-list .backup-code-provider .backup-code-input {
+    margin-top: 0;
+    border: none;
+    border-top: 1px solid #dee2e6;
+    border-radius: 0 0 4px 4px;
+    background: #fff;
 }
 
 /* Responsive design */
@@ -276,8 +373,8 @@
 
 /* Loading state */
 .two-factor-form.loading {
-	opacity: 0.7;
-	pointer-events: none;
+    opacity: 0.6;
+    pointer-events: none;
 }
 
 .two-factor-form.loading::after {
@@ -289,12 +386,12 @@
 	height: 20px;
 	margin: -10px 0 0 -10px;
 	border: 2px solid #f3f3f3;
-	border-top: 2px solid #0073aa;
+	border-top: 2px solid #007cba;
 	border-radius: 50%;
-	animation: two-factor-spin 1s linear infinite;
+	animation: spin 1s linear infinite;
 }
 
-@keyframes two-factor-spin {
-	0% { transform: rotate(0deg); }
-	100% { transform: rotate(360deg); }
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }

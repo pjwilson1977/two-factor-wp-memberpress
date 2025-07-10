@@ -169,55 +169,48 @@
 		<div class="provider-options">
 			<h3><?php _e( 'Alternative Methods', 'two-factor' ); ?></h3>
 
-			<?php if ( $backup_available ): ?>
-			<div class="backup-code-toggle">
-				<a href="#" onclick="toggleBackupCode(); return false;"><?php _e( 'Use a backup code', 'two-factor' ); ?></a>
-			</div>
-
-			<div class="backup-code-input" id="backup-code-form">
-				<form method="post" action="">
-					<input type="hidden" name="provider" value="Two_Factor_Backup_Codes" />
-					<input type="hidden" name="wp-auth-id" value="<?php echo esc_attr( $user->ID ); ?>" />
-					<input type="hidden" name="wp-auth-nonce" value="<?php echo esc_attr( $login_nonce ); ?>" />
-					<input type="hidden" name="redirect_to" value="<?php echo esc_attr( $redirect_to ); ?>" />
-					<input type="hidden" name="rememberme" value="<?php echo esc_attr( $rememberme ); ?>" />
-
-					<div class="form-field">
-						<label for="backup-code"><?php _e( 'Backup Code', 'two-factor' ); ?></label>
-						<input type="text" name="two-factor-backup-code" id="backup-code" placeholder="<?php _e( 'Enter backup code', 'two-factor' ); ?>" />
-					</div>
-					<button type="submit" class="btn"><?php _e( 'Verify Backup Code', 'two-factor' ); ?></button>
-				</form>
-			</div>
-			<?php endif; ?>
-
-			<?php if ( count( $available_providers ) > 1 ): ?>
 			<ul class="provider-list">
-				<?php foreach ( $available_providers as $available_provider ): ?>
-					<?php if ( get_class( $available_provider ) !== get_class( $provider ) ): ?>
-					<li>
-						<a href="<?php echo esc_url( add_query_arg( 'provider', get_class( $available_provider ) ) ); ?>">
-							<?php echo esc_html( $available_provider->get_label() ); ?>
-						</a>
-					</li>
-					<?php endif; ?>
-				<?php endforeach; ?>
+				<?php if ( $backup_available ): ?>
+				<li class="backup-code-provider">
+					<a href="#" class="backup-code-toggle-link"><?php _e( 'Use a backup recovery code', 'two-factor' ); ?></a>
+					
+					<div class="backup-code-input" id="backup-code-form">
+						<form method="post" action="">
+							<input type="hidden" name="provider" value="Two_Factor_Backup_Codes" />
+							<input type="hidden" name="wp-auth-id" value="<?php echo esc_attr( $user->ID ); ?>" />
+							<input type="hidden" name="wp-auth-nonce" value="<?php echo esc_attr( $login_nonce ); ?>" />
+							<input type="hidden" name="redirect_to" value="<?php echo esc_attr( $redirect_to ); ?>" />
+							<input type="hidden" name="rememberme" value="<?php echo esc_attr( $rememberme ); ?>" />
+
+							<div class="form-field">
+								<label for="backup-code"><?php _e( 'Backup Recovery Code', 'two-factor' ); ?></label>
+								<input type="text" name="two-factor-backup-code" id="backup-code" placeholder="<?php _e( 'Enter backup recovery code', 'two-factor' ); ?>" />
+							</div>
+							<button type="submit" class="btn"><?php _e( 'Verify Backup Code', 'two-factor' ); ?></button>
+						</form>
+					</div>
+				</li>
+				<?php endif; ?>
+				
+				<?php if ( count( $available_providers ) > 1 ): ?>
+					<?php foreach ( $available_providers as $available_provider ): ?>
+						<?php 
+						$provider_class = get_class( $available_provider );
+						// Skip current provider and backup codes (which have their own list item above)
+						if ( $provider_class !== get_class( $provider ) && $provider_class !== 'Two_Factor_Backup_Codes' ): 
+						?>
+						<li>
+							<a href="<?php echo esc_url( add_query_arg( 'provider', $provider_class ) ); ?>">
+								<?php echo esc_html( $available_provider->get_label() ); ?>
+							</a>
+						</li>
+						<?php endif; ?>
+					<?php endforeach; ?>
+				<?php endif; ?>
 			</ul>
-			<?php endif; ?>
 		</div>
 		<?php endif; ?>
 	</div>
-
-	<script>
-		function toggleBackupCode() {
-			var form = document.getElementById('backup-code-form');
-			if (form.classList.contains('show')) {
-				form.classList.remove('show');
-			} else {
-				form.classList.add('show');
-			}
-		}
-	</script>
 
 	<?php wp_footer(); ?>
 </body>

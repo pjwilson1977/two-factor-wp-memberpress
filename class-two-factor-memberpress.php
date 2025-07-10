@@ -1173,18 +1173,20 @@ class Two_Factor_MemberPress {
 		if ( isset( $_GET['two_factor_setup'] ) || isset( $_GET['two_factor_login'] ) ) {
 			wp_enqueue_style(
 				'two-factor-frontend',
-				plugins_url( 'assets/two-factor-frontend.css', TWO_FACTOR_DIR . 'two-factor.php' ),
+				plugins_url( 'assets/two-factor-frontend.css', __FILE__ ),
 				array(),
-				TWO_FACTOR_VERSION
+				'1.0.0'
 			);
 			
 			wp_enqueue_script(
 				'two-factor-frontend',
-				plugins_url( 'assets/two-factor-frontend.js', TWO_FACTOR_DIR . 'two-factor.php' ),
+				plugins_url( 'assets/two-factor-frontend.js', __FILE__ ),
 				array(),
-				TWO_FACTOR_VERSION,
+				'1.0.0',
 				true
 			);
+			
+			error_log( 'Enqueued 2FA frontend assets' );
 		}
 	}
 

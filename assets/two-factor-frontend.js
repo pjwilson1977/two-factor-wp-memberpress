@@ -20,7 +20,7 @@
 		}
 
 		// Handle backup code toggle
-		var backupToggle = document.querySelector(".backup-code-toggle a");
+		var backupToggle = document.querySelector(".backup-code-toggle-link");
 		if (backupToggle) {
 			backupToggle.addEventListener("click", function (e) {
 				e.preventDefault();
@@ -79,8 +79,9 @@
 	}
 
 	function toggleBackupCode() {
+		console.log("Toggling backup code form visibility");
 		var backupForm = document.getElementById("backup-code-form");
-		var toggle = document.querySelector(".backup-code-toggle a");
+		var toggle = document.querySelector(".backup-code-toggle-link");
 
 		if (backupForm) {
 			if (backupForm.classList.contains("show")) {
