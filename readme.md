@@ -1,52 +1,163 @@
-# Two-Factor
+# Two Factor WordPress for MemberPress
 
-[![Test](https://github.com/WordPress/two-factor/actions/workflows/test.yml/badge.svg)](https://github.com/WordPress/two-factor/actions/workflows/test.yml) [![Deploy](https://github.com/WordPress/two-factor/actions/workflows/deploy.yml/badge.svg)](https://github.com/WordPress/two-factor/actions/workflows/deploy.yml) [![WordPress Playground Demo](https://img.shields.io/wordpress/plugin/v/two-factor?logo=wordpress&logoColor=FFFFFF&label=Playground%20Demo&labelColor=3858E9&color=3858E9)](https://playground.wordpress.net/?blueprint-url=https://raw.githubusercontent.com/WordPress/two-factor/add-blueprint/assets/blueprints/blueprint.json)
+A WordPress plugin that provides two-factor authentication integration specifically designed for MemberPress. This plugin is forked from the official WordPress Two-Factor plugin and enhanced to work seamlessly with MemberPress membership sites.
 
-Two-Factor plugin for WordPress. [View on WordPress.org →](https://wordpress.org/plugins/two-factor/)
+## Features
+
+- **Force 2FA Setup**: All users are required to set up two-factor authentication on their first login after plugin activation
+- **Frontend Integration**: 2FA setup and login happens on the frontend, integrating with MemberPress login flow
+- **TOTP Priority**: Time-based One-Time Password (Authenticator apps) is the default and recommended method
+- **Multiple Authentication Methods**: Support for TOTP, Email, FIDO U2F, and backup codes
+- **Admin Controls**: Administrators can manage which authentication methods are allowed
+- **Role-based Requirements**: Option to require 2FA for specific user roles only
+- **Backup Codes**: Users can generate and download backup codes for account recovery
+- **MemberPress Integration**: Respects MemberPress redirect URLs and login flow
+
+## Installation
+
+1. Upload the plugin files to `/wp-content/plugins/two-factor-wp-memberpress/`
+2. Activate the plugin through the 'Plugins' screen in WordPress
+3. Go to Settings > Two Factor MP to configure the plugin
+
+## Configuration
+
+### Admin Settings
+
+Navigate to **Settings > Two Factor MP** in your WordPress admin to configure:
+
+- **Force Two-Factor Authentication**: Enable to require all users to set up 2FA
+- **Required User Roles**: Select which user roles must use 2FA (leave empty for all users)
+- **Allowed Authentication Methods**: Choose which 2FA methods users can use
+
+### Forcing 2FA for Existing Users
+
+Use the "Force 2FA Setup for All Users" button in the admin settings to mark all existing users as needing to set up 2FA on their next login.
 
 ## Usage
 
-See the [readme.txt](readme.txt) for installation and usage instructions.
+### For Users
 
-## Contribute
+#### First-time Setup
 
-Please [report (non-security) issues](https://github.com/WordPress/two-factor/issues) and [open pull requests](https://github.com/WordPress/two-factor/pulls) on GitHub. See below for information on reporting potential security/privacy vulnerabilities.
+1. After the plugin is activated, users will be redirected to a 2FA setup page on their next login
+2. Users will be guided through:
+   - Installing an authenticator app (Google Authenticator, Microsoft Authenticator, Authy)
+   - Scanning a QR code or entering a secret key
+   - Verifying the setup with a test code
+   - Downloading backup codes
 
-Join the `#core-passwords` channel [on WordPress Slack](http://wordpress.slack.com) ([sign up here](http://chat.wordpress.org)).
+#### Daily Login
 
-To use the provided development environment, you'll first need to install and launch Docker. Once it's running, the next steps are:
+1. Enter username and password as normal
+2. Enter the 6-digit code from their authenticator app
+3. Alternative options:
+   - Use email 2FA (if enabled)
+   - Use a backup code
+   - Switch to another enabled authentication method
 
-    $ git clone https://github.com/wordpress/two-factor.git
-    $ cd two-factor
-    $ npm install
-    $ npm run build
-    $ npm run env start
+### For Developers
 
-See `package.json` for other available scripts you might want to use during development, like linting and testing.
+#### Shortcode
 
-When you're ready, open [a pull request](https://help.github.com/articles/creating-a-pull-request-from-a-fork/) with the suggested changes.
+Use the `[two_factor_setup]` shortcode to display a 2FA setup interface on any page.
 
-## Testing
+#### Hooks and Filters
 
-1. Run `npm test` or `npm run test:watch`.
+The plugin provides several hooks for customization:
 
-To generate a code coverage report, be sure to start the testing environment with coverage support enabled:
-    npm run env start -- --xdebug=coverage
+```php
+// Filter available providers
+add_filter( 'two_factor_providers', 'your_custom_provider_filter' );
 
-To view the code coverage report, you can open a web browser, go to `File > Open file...`, and then select `{path to two-factor}/tests/logs/html/index.html`.
+// Customize post-login redirect
+add_filter( 'two_factor_memberpress_redirect_url', 'your_redirect_function' );
+```
 
-## Deployments
+## Supported Authentication Methods
 
-Deployments [to WP.org plugin repository](https://wordpress.org/plugins/two-factor/) are handled automatically by the GitHub action [.github/workflows/deploy.yml](.github/workflows/deploy.yml). All merges to the `master` branch are committed to the [`trunk` directory](https://plugins.trac.wordpress.org/browser/two-factor/trunk) while all [Git tags](https://github.com/WordPress/two-factor/tags) are pushed as versioned releases [under the `tags` directory](https://plugins.trac.wordpress.org/browser/two-factor/tags).
+### TOTP (Time-based One-Time Password) - Default
+- **Apps**: Google Authenticator, Microsoft Authenticator, Authy
+- **Security**: High
+- **Offline**: Works without internet connection
 
-## Known Issues
+### Email
+- **Method**: Codes sent to user's email address
+- **Security**: Medium (depends on email security)
+- **Backup**: Good fallback option
 
-- PHP codebase doesn't pass the WordPress coding standard checks, see [#437](https://github.com/WordPress/two-factor/issues/437).
+### FIDO U2F
+- **Method**: Hardware security keys (YubiKey, etc.)
+- **Security**: Very High
+- **Requirements**: HTTPS and compatible browser
+
+### Backup Codes
+- **Method**: Pre-generated single-use codes
+- **Purpose**: Account recovery when primary method is unavailable
+- **Important**: Each code can only be used once
+
+## Requirements
+
+- WordPress 6.7 or higher
+- PHP 7.2 or higher
+- MemberPress plugin (recommended)
+- HTTPS (required for FIDO U2F)
+
+## Compatibility
+
+- **WordPress**: 6.7+
+- **MemberPress**: All versions
+- **Browsers**: All modern browsers
+- **Mobile**: Responsive design works on all devices
+
+## Security Best Practices
+
+1. **HTTPS**: Always use HTTPS in production
+2. **Backup Codes**: Encourage users to save backup codes securely
+3. **Email Security**: If using email 2FA, ensure email accounts are secure
+4. **Regular Audits**: Review user 2FA status regularly
+
+## Troubleshooting
+
+### Users Can't Complete Setup
+
+- Check that the site time is correct (important for TOTP)
+- Verify QR codes are displaying properly
+- Ensure users are using compatible authenticator apps
+
+### Login Issues
+
+- Verify the user's device time is synchronized
+- Check that backup codes haven't all been used
+- Confirm the user is entering codes correctly (no spaces)
+
+### Plugin Conflicts
+
+- Deactivate other 2FA plugins to avoid conflicts
+- Check that caching plugins aren't interfering with sessions
+- Ensure no other plugins are modifying the login flow
+
+## Support
+
+For support and feature requests, please use the GitHub repository:
+https://github.com/pjwilson1977/two-factor-wp-memberpress
+
+## Changelog
+
+### 0.14.0-mp.1
+- Initial MemberPress integration release
+- Frontend 2FA setup and login
+- TOTP as default authentication method
+- Admin controls for method management
+- Role-based 2FA requirements
+- Backup code generation
+- Responsive design templates
 
 ## Credits
 
-Created [by contributors](https://github.com/WordPress/two-factor/graphs/contributors) and released under [GPLv2 or later](LICENSE.md).
+This plugin is based on the official WordPress Two-Factor plugin by WordPress.org Contributors.
 
-## Security
+## License
+
+GPL-2.0-or-later
 
 Please privately report any potential security issues to the [WordPress HackerOne](https://hackerone.com/wordpress) program.

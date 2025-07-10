@@ -235,7 +235,9 @@ class Two_Factor_Totp extends Two_Factor_Provider {
 		 * @param WP_User $user       The User object.
 		 * @param string  $issuer     The issuer of the TOTP. This should be the prefix of the result.
 		 */
-		$totp_title = apply_filters( 'two_factor_totp_title', $issuer . ':' . $user->user_login, $user, $issuer );
+		// Use email if available, fallback to user_login, then display_name
+		$user_identifier = ! empty( $user->user_email ) ? $user->user_email : ( ! empty( $user->display_name ) ? $user->display_name : $user->user_login );		
+		$totp_title = apply_filters( 'two_factor_totp_title', $issuer . ':' . $user_identifier, $user, $issuer );
 
 		$totp_url = add_query_arg(
 			array(
