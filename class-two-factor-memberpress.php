@@ -85,6 +85,21 @@ class Two_Factor_MemberPress {
 		// debug email
 		add_action( 'wp_mail', array( __CLASS__, 'debug_wp_mail' ), 10, 1 );
     	add_action( 'wp_mail_failed', array( __CLASS__, 'debug_wp_mail_failed' ), 10, 1 );
+		
+		// Admin user list actions
+		add_filter( 'user_row_actions', array( __CLASS__, 'add_user_row_actions' ), 10, 2 );
+		add_action( 'admin_init', array( __CLASS__, 'handle_admin_reset_2fa' ) );
+		add_action( 'admin_notices', array( __CLASS__, 'admin_reset_2fa_notices' ) );
+		
+		// Add this to the init() method
+		add_filter( 'two_factor_revalidate_time', array( __CLASS__, 'extend_grace_period_for_testing' ), 10, 3 );
+		add_action('current_screen', array(__CLASS__, 'force_admin_2fa_access'), 1);
+		
+		// Comprehensive 2FA override
+		add_action('init', array(__CLASS__, 'intercept_core_2fa_urls'), 1);
+		add_action('login_form_revalidate_2fa', array(__CLASS__, 'override_core_2fa_action'), 1);
+		add_action('login_form_validate_2fa', array(__CLASS__, 'override_core_2fa_action'), 1);
+		add_filter('login_url', array(__CLASS__, 'override_login_url'), 10, 3);		
 	}
 
 	/**
@@ -98,7 +113,31 @@ class Two_Factor_MemberPress {
 		error_log( '=== Frontend 2FA Login Debug ===' );
 		error_log( 'GET parameters: ' . print_r( $_GET, true ) );
 		error_log( 'POST parameters: ' . print_r( $_POST, true ) );
-		error_log( 'SESSION data: ' . print_r( $_SESSION, true ) );
+		
+		// Fix: Ensure session is started before accessing $_SESSION
+		if ( ! session_id() ) {
+			session_start();
+		}
+		
+		// Only log session data if session exists
+		if ( isset( $_SESSION ) ) {
+			error_log( 'SESSION data: ' . print_r( $_SESSION, true ) );
+			
+			// ADD THESE CHECKS
+			if ( isset( $_SESSION['email_2fa_sent_1'] ) && !isset( $_SESSION['email_2fa_user_id'] ) ) {
+				error_log( 'WARNING: Email 2FA timestamp found but no user ID - this indicates the session issue' );
+			}
+			
+			if ( isset( $_SESSION['two_factor_login_user_id'] ) ) {
+				error_log( 'User ID found in two_factor_login_user_id: ' . $_SESSION['two_factor_login_user_id'] );
+			}
+			
+			if ( isset( $_SESSION['email_2fa_user_id'] ) ) {
+				error_log( 'User ID found in email_2fa_user_id: ' . $_SESSION['email_2fa_user_id'] );
+			}
+		} else {
+			error_log( 'SESSION data: No session available' );
+		}
 		
 		// Check if provider switching is being handled
 		if ( isset( $_GET['provider'] ) ) {
@@ -193,6 +232,41 @@ class Two_Factor_MemberPress {
 	 * @param WP_User $user       User object
 	 */
 	public static function handle_user_login( $user_login, $user ) {
+		// Don't interfere with revalidation process
+		if ( isset( $_GET['action'] ) && $_GET['action'] === 'revalidate_2fa' ) {
+			error_log( 'Revalidation in progress - skipping custom 2FA handling' );
+			return;
+		}
+		
+		// Don't interfere with core 2FA validation
+		if ( isset( $_GET['action'] ) && $_GET['action'] === 'validate_2fa' ) {
+			error_log( 'Core 2FA validation in progress - skipping custom handling' );
+			return;
+		}
+		
+		// IMPORTANT: Don't interfere if this is a revalidation login
+		// Check if user is already logged in AND this is the same user
+		if ( is_user_logged_in() && get_current_user_id() === $user->ID ) {
+			// Check if this was triggered by a revalidation process
+			$session = Two_Factor_Core::get_current_user_session();
+			if ( $session && isset( $session['two-factor-login'] ) ) {
+				error_log( 'User already logged in with valid 2FA session - likely revalidation, skipping custom handling' );
+				return;
+			}
+		}
+		
+		// Don't interfere with admin/wp-login.php based logins
+		if ( is_admin() || ( isset( $_SERVER['REQUEST_URI'] ) && strpos( $_SERVER['REQUEST_URI'], 'wp-login.php' ) !== false ) ) {
+			error_log( 'Admin or wp-login.php login detected - letting core handle 2FA' );
+			return;
+		}
+
+		// Don't interfere with any core 2FA authentication posts
+		if ( isset( $_POST['wp-auth-id'] ) || isset( $_POST['wp-auth-nonce'] ) ) {
+			error_log( 'Core 2FA authentication POST detected - skipping custom handling' );
+			return;
+		}
+		
 		// Add debugging
 		error_log( 'handle_user_login called for user: ' . $user_login . ' (ID: ' . $user->ID . ')' );
 		error_log( 'is_admin(): ' . ( is_admin() ? 'Yes' : 'No' ) );
@@ -243,11 +317,14 @@ class Two_Factor_MemberPress {
 			
 			// Store user info for 2FA login
 			if ( ! session_id() ) {
-				session_start();
+    			session_start();
 			}
 			$_SESSION['two_factor_login_user_id'] = $user->ID;
 			$_SESSION['two_factor_login_timestamp'] = time();
 			$_SESSION['two_factor_login_redirect'] = $redirect_to;
+
+			// ADD THIS LINE - Also store the user ID in the email session key format for consistency
+			$_SESSION['email_2fa_user_id'] = $user->ID;
 			
 			// Redirect to frontend 2FA login
 			self::redirect_to_frontend_2fa_login();
@@ -353,19 +430,6 @@ class Two_Factor_MemberPress {
 		$_SESSION['two_factor_setup_timestamp'] = time();
 	}
 
-	/**
-	 * Store user info for 2FA login process
-	 *
-	 * @param WP_User $user User object
-	 */
-	private static function store_user_for_2fa_login( $user ) {
-		if ( ! session_id() ) {
-			session_start();
-		}
-		$_SESSION['two_factor_login_user_id'] = $user->ID;
-		$_SESSION['two_factor_login_timestamp'] = time();
-		$_SESSION['two_factor_login_redirect'] = isset( $_POST['redirect_to'] ) ? $_POST['redirect_to'] : home_url();
-	}
 
 	/**
 	 * Get stored user for 2FA setup
@@ -404,6 +468,27 @@ class Two_Factor_MemberPress {
 		error_log( 'get_stored_user_for_2fa_login: Session ID = ' . session_id() );
 		error_log( 'Session data: ' . print_r( $_SESSION, true ) );
 		
+		// CHECK FOR REVALIDATION SCENARIO FIRST
+		if ( isset( $_SESSION['email_2fa_user_id'] ) && is_user_logged_in() ) {
+			$stored_user_id = $_SESSION['email_2fa_user_id'];
+			$current_user = wp_get_current_user();
+			
+			// If the stored user matches the current logged-in user, this is likely revalidation
+			if ( $current_user && $current_user->ID == $stored_user_id ) {
+				error_log( 'Revalidation scenario detected - using current logged-in user: ' . $current_user->ID );
+				
+				// Set the login timestamp if not already set (for session validation)
+				if ( ! isset( $_SESSION['two_factor_login_timestamp'] ) ) {
+					$_SESSION['two_factor_login_timestamp'] = time();
+					$_SESSION['two_factor_login_user_id'] = $current_user->ID;
+					error_log( 'Set login timestamp for revalidation session' );
+				}
+				
+				return $current_user;
+			}
+		}
+		
+		// ORIGINAL LOGIN FLOW CHECK
 		if ( ! isset( $_SESSION['two_factor_login_user_id'] ) || ! isset( $_SESSION['two_factor_login_timestamp'] ) ) {
 			error_log( 'No 2FA login session data found' );
 			return null;
@@ -470,25 +555,40 @@ class Two_Factor_MemberPress {
 	public static function handle_frontend_2fa_setup() {
 		// Add debugging
 		error_log( 'handle_frontend_2fa_setup called. REQUEST_METHOD: ' . $_SERVER['REQUEST_METHOD'] );
-		error_log( 'POST data: ' . print_r( $_POST, true ) );
-		error_log( 'GET data: ' . print_r( $_GET, true ) );
 		
-		// Handle 2FA setup
+		// IMPORTANT: Don't interfere with ANY core 2FA processes
+		if ( isset( $_GET['action'] ) && in_array( $_GET['action'], [ 'revalidate_2fa', 'validate_2fa' ] ) ) {
+			error_log( 'Core 2FA action detected (' . $_GET['action'] . ') - letting core handle it' );
+			return;
+		}
+		
+		// Don't interfere if this is a revalidation POST
+		if ( $_SERVER['REQUEST_METHOD'] === 'POST' && 
+			 ( isset( $_POST['wp-auth-id'] ) || isset( $_POST['wp-auth-nonce'] ) || isset( $_POST['provider'] ) ) ) {
+			error_log( 'Core 2FA POST detected - letting core handle it' );
+			return;
+		}
+		
+		// Don't interfere with wp-login.php based 2FA
+		if ( isset( $_SERVER['REQUEST_URI'] ) && strpos( $_SERVER['REQUEST_URI'], 'wp-login.php' ) !== false ) {
+			error_log( 'wp-login.php request detected - letting core handle it' );
+			return;
+		}
+		
+		// Only handle OUR specific 2FA setup process
 		if ( isset( $_GET['two_factor_setup'] ) && $_GET['two_factor_setup'] === '1' ) {
-			error_log( 'Handling 2FA setup request' );
+			error_log( 'Handling custom 2FA setup request' );
 			
 			// Handle POST form submissions (verification, backup codes, etc.)
 			if ( $_SERVER['REQUEST_METHOD'] === 'POST' ) {
 				error_log( 'Processing POST request for 2FA setup' );
 				self::process_2fa_setup_form();
-				return; // Important: return after processing to prevent further execution
+				return;
 			}
 			
-			// Handle GET with setup confirmation (user clicked "I've Added the Account to My App")
+			// Handle GET with setup confirmation
 			if ( isset( $_GET['setup_confirmed'] ) && $_GET['setup_confirmed'] === '1' ) {
 				error_log( 'User confirmed setup, advancing to verify step' );
-				// User confirmed they've added the account, advance to verification
-				// The step=verify is already in the URL, so just continue to display
 			}
 			
 			// Display 2FA setup page
@@ -496,10 +596,11 @@ class Two_Factor_MemberPress {
 			return;
 		}
 		
-		// Handle 2FA login
-		if ( isset( $_GET['two_factor_login'] ) && $_GET['two_factor_login'] === '1' ) {
-			error_log( 'Handling 2FA login request' );
-			// Display 2FA login page
+		// Only handle OUR specific 2FA login (not revalidation)
+		if ( isset( $_GET['two_factor_login'] ) && $_GET['two_factor_login'] === '1' && 
+			 !isset( $_GET['error'] ) ) // Don't handle error redirects from core
+		{
+			error_log( 'Handling custom 2FA login request' );
 			add_action( 'wp', array( __CLASS__, 'display_2fa_login_page' ), 1 );
 			return;
 		}
@@ -665,122 +766,7 @@ class Two_Factor_MemberPress {
 		
 		error_log( 'No matching conditions in process_2fa_setup_form' );
 	}
-
-	/**
-	 * Setup TOTP for user
-	 *
-	 * @param WP_User $user User object
-	 */
-	private static function setup_totp_for_user( $user ) {
-		$totp_provider = Two_Factor_Core::get_providers()['Two_Factor_Totp'];
-		if ( $totp_provider ) {
-			// Generate new secret
-			$secret = $totp_provider->generate_key();
-			update_user_meta( $user->ID, Two_Factor_Totp::SECRET_META_KEY, $secret );
-			
-			// Enable TOTP provider
-			$enabled_providers = get_user_meta( $user->ID, Two_Factor_Core::ENABLED_PROVIDERS_USER_META_KEY, true );
-			if ( ! is_array( $enabled_providers ) ) {
-				$enabled_providers = array();
-			}
-			if ( ! in_array( 'Two_Factor_Totp', $enabled_providers ) ) {
-				$enabled_providers[] = 'Two_Factor_Totp';
-				update_user_meta( $user->ID, Two_Factor_Core::ENABLED_PROVIDERS_USER_META_KEY, $enabled_providers );
-			}
-			
-			// Set as primary provider
-			update_user_meta( $user->ID, Two_Factor_Core::PROVIDER_USER_META_KEY, 'Two_Factor_Totp' );
-		}
-	}
-
-	/**
-	 * Verify TOTP setup
-	 *
-	 * @param WP_User $user User object
-	 */
-	private static function verify_totp_setup( $user ) {
-		if ( ! isset( $_POST['totp_code'] ) ) {
-			return;
-		}
-		
-		$totp_provider = Two_Factor_Core::get_providers()['Two_Factor_Totp'];
-		$code = sanitize_text_field( $_POST['totp_code'] );
-		
-		if ( $totp_provider && $totp_provider->validate_authentication( $user, array( 'two-factor-totp-authcode' => $code ) ) ) {
-			// TOTP verified successfully
-			update_user_meta( $user->ID, '_two_factor_totp_verified', true );
-			
-			// Redirect to backup codes generation
-			$redirect_url = add_query_arg( array(
-				'two_factor_setup' => '1',
-				'step' => 'backup_codes'
-			), home_url() );
-			wp_redirect( $redirect_url );
-			exit;
-		} else {
-			// Invalid code
-			wp_redirect( add_query_arg( array(
-				'two_factor_setup' => '1',
-				'step' => 'verify',
-				'error' => 'invalid_code'
-			), home_url() ) );
-			exit;
-		}
-	}
-
-	/**
-	 * Generate backup codes for user
-	 *
-	 * @param WP_User $user User object
-	 */
-	private static function generate_backup_codes_for_user( $user ) {
-		$backup_provider = Two_Factor_Core::get_providers()['Two_Factor_Backup_Codes'];
-		if ( $backup_provider ) {
-			// Enable backup codes provider
-			$enabled_providers = get_user_meta( $user->ID, Two_Factor_Core::ENABLED_PROVIDERS_USER_META_KEY, true );
-			if ( ! is_array( $enabled_providers ) ) {
-				$enabled_providers = array();
-			}
-			if ( ! in_array( 'Two_Factor_Backup_Codes', $enabled_providers ) ) {
-				$enabled_providers[] = 'Two_Factor_Backup_Codes';
-				update_user_meta( $user->ID, Two_Factor_Core::ENABLED_PROVIDERS_USER_META_KEY, $enabled_providers );
-			}
-			
-			// Generate backup codes
-			$backup_codes = $backup_provider->generate_codes( $user );
-			
-			// Store backup codes in session for display
-			if ( ! session_id() ) {
-				session_start();
-			}
-			$_SESSION['two_factor_backup_codes'] = $backup_codes;
-			
-			error_log( 'Generated backup codes for user ' . $user->ID . ': ' . count( $backup_codes ) . ' codes' );
-		}
-	}
-
-	/**
-	 * Complete 2FA setup process
-	 *
-	 * @param WP_User $user User object
-	 */
-	private static function complete_2fa_setup( $user ) {
-		// Mark user as no longer needing setup
-		delete_user_meta( $user->ID, self::USER_NEEDS_2FA_SETUP_KEY );
-		update_user_meta( $user->ID, self::USER_2FA_SETUP_FORCED_KEY, true );
-		
-		// Clear session
-		self::clear_stored_user_for_2fa_setup();
-		
-		// Log the user in
-		wp_set_current_user( $user->ID );
-		wp_set_auth_cookie( $user->ID );
-		
-		// Redirect to appropriate page
-		$redirect_url = self::get_post_login_redirect_url( $user );
-		wp_redirect( $redirect_url );
-		exit;
-	}
+	
 
 	/**
 	 * Get post-login redirect URL
@@ -889,6 +875,12 @@ class Two_Factor_MemberPress {
 				session_start();
 			}
 			
+			// ENSURE USER ID IS STORED PROPERLY - ADD THESE LINES
+			if ( !isset( $_SESSION['email_2fa_user_id'] ) && $user ) {
+				$_SESSION['email_2fa_user_id'] = $user->ID;
+				error_log( 'Stored user ID for email 2FA compatibility: ' . $user->ID );
+			}
+			
 			$email_sent_key = 'email_2fa_sent_' . $user->ID;
 			$email_already_sent = isset( $_SESSION[ $email_sent_key ] ) && ( time() - $_SESSION[ $email_sent_key ] ) < 300; // 5 minutes
 			
@@ -935,7 +927,6 @@ class Two_Factor_MemberPress {
 		
 		// **MAKE THESE VARIABLES AVAILABLE TO THE TEMPLATE**
 		// Set variables that the template expects
-		$login_nonce = array( 'key' => $login_nonce );
 		$interim_login = false; // Set based on your needs
 		$rememberme = ! empty( $_POST['rememberme'] );
 		
@@ -1212,6 +1203,7 @@ class Two_Factor_MemberPress {
 			delete_user_meta( $user_id, Two_Factor_Core::PROVIDER_USER_META_KEY );
 			delete_user_meta( $user_id, Two_Factor_Totp::SECRET_META_KEY );
 			delete_user_meta( $user_id, Two_Factor_Backup_Codes::BACKUP_CODES_META_KEY );
+			delete_user_meta( $user_id, Two_Factor_Email::TOKEN_META_KEY );
 			delete_user_meta( $user_id, self::USER_2FA_SETUP_FORCED_KEY );
 			
 			// Mark user as needing 2FA setup
@@ -1315,32 +1307,7 @@ class Two_Factor_MemberPress {
 			
 			error_log( 'Enqueued 2FA frontend assets' );
 		}
-	}
-
-	/**
-	 * Debug helper to calculate TOTP code for a given time window
-	 */
-	private static function debug_calc_totp( $secret, $time_window ) {
-		$totp_provider = Two_Factor_Core::get_providers()['Two_Factor_Totp'];
-		
-		// If calc_totp method exists, use it
-		if ( method_exists( $totp_provider, 'calc_totp' ) ) {
-			return $totp_provider->calc_totp( $secret, $time_window );
-		}
-		
-		// Otherwise, calculate manually for debugging
-		$time_bytes = pack( 'N*', 0 ) . pack( 'N*', $time_window );
-		$hash = hash_hmac( 'sha1', $time_bytes, base32_decode( $secret ), true );
-		$offset = ord( $hash[19] ) & 0xf;
-		$code = (
-			( ( ord( $hash[ $offset + 0 ] ) & 0x7f ) << 24 ) |
-			( ( ord( $hash[ $offset + 1 ] ) & 0xff ) << 16 ) |
-			( ( ord( $hash[ $offset + 2 ] ) & 0xff ) << 8 ) |
-			( ord( $hash[ $offset + 3 ] ) & 0xff )
-		) % pow( 10, 6 );
-		
-		return str_pad( $code, 6, '0', STR_PAD_LEFT );
-	}
+	}	
 
 	/**
 	 * Clean up inconsistent user 2FA state
@@ -1411,4 +1378,448 @@ class Two_Factor_MemberPress {
 			Two_Factor_Core::enable_provider_for_user( $user->ID, 'Two_Factor_Email' );
 		}
 	}
+
+	/**
+	 * Add Reset 2FA action to user row actions
+	 *
+	 * @param array   $actions User row actions
+	 * @param WP_User $user    User object
+	 * @return array Modified actions
+	 */
+	public static function add_user_row_actions( $actions, $user ) {
+		// Only show for users who can manage users and only if user has 2FA enabled
+		if ( ! current_user_can( 'edit_users' ) ) {
+			return $actions;
+		}
+		
+		// Don't show for current user (they can use the existing reset function)
+		if ( $user->ID === get_current_user_id() ) {
+			return $actions;
+		}
+		
+		// Only show if user has 2FA configured
+		if ( Two_Factor_Core::is_user_using_two_factor( $user->ID ) ) {
+			$reset_url = wp_nonce_url(
+				add_query_arg(
+					array(
+						'action' => 'reset_user_2fa',
+						'user_id' => $user->ID,
+					),
+					admin_url( 'users.php' )
+				),
+				'reset_2fa_' . $user->ID
+			);
+			
+			$actions['reset_2fa'] = sprintf(
+				'<a href="%s" onclick="return confirm(\'%s\')">%s</a>',
+				esc_url( $reset_url ),
+				esc_js( sprintf( 
+					__( 'Are you sure you want to reset two-factor authentication for %s? This will disable all their 2FA methods and require them to set up 2FA again on their next login.', 'two-factor' ),
+					$user->display_name 
+				) ),
+				__( 'Reset 2FA', 'two-factor' )
+			);
+		}
+		
+		return $actions;
+	}
+
+	/**
+	 * Handle admin reset 2FA action
+	 */
+	public static function handle_admin_reset_2fa() {
+		// Check if this is a reset 2FA request
+		if ( ! isset( $_GET['action'] ) || $_GET['action'] !== 'reset_user_2fa' ) {
+			return;
+		}
+		
+		// Check capabilities
+		if ( ! current_user_can( 'edit_users' ) ) {
+			wp_die( __( 'You do not have permission to perform this action.', 'two-factor' ) );
+		}
+		
+		// Get and validate user ID
+		$user_id = isset( $_GET['user_id'] ) ? absint( $_GET['user_id'] ) : 0;
+		if ( ! $user_id ) {
+			wp_die( __( 'Invalid user ID.', 'two-factor' ) );
+		}
+		
+		// Verify nonce
+		if ( ! wp_verify_nonce( $_GET['_wpnonce'], 'reset_2fa_' . $user_id ) ) {
+			wp_die( __( 'Security check failed.', 'two-factor' ) );
+		}
+		
+		// Get user object
+		$user = get_user_by( 'ID', $user_id );
+		if ( ! $user ) {
+			wp_die( __( 'User not found.', 'two-factor' ) );
+		}
+		
+		// Prevent resetting admin's own 2FA through this method
+		if ( $user_id === get_current_user_id() ) {
+			wp_die( __( 'You cannot reset your own 2FA through this method. Use the existing reset function instead.', 'two-factor' ) );
+		}
+		
+		// Perform the reset
+		$reset_result = self::reset_user_2fa( $user_id );
+		
+		// Log the action
+		error_log( sprintf(
+		 'Admin %s (%d) reset 2FA for user %s (%d)',
+		 wp_get_current_user()->user_login,
+		 get_current_user_id(),
+		 $user->user_login,
+		 $user_id
+		) );
+		
+		// Redirect with success/error message
+		$redirect_url = add_query_arg(
+			array(
+			 'reset_2fa_result' => $reset_result ? 'success' : 'error',
+			 'reset_user_name' => urlencode( $user->display_name ),
+			),
+			admin_url( 'users.php' )
+		);
+		
+		wp_redirect( $redirect_url );
+		exit;
+	}
+
+	/**
+	 * Reset 2FA for a specific user
+	 *
+	 * @param int $user_id User ID
+	 * @return bool Success status
+	 */
+	public static function reset_user_2fa( $user_id ) {
+		// Validate user exists
+		$user = get_user_by( 'ID', $user_id );
+		if ( ! $user ) {
+			return false;
+		}
+		
+		// Prevent affecting current admin session
+		$current_user_id = get_current_user_id();
+		if ( $user_id === $current_user_id ) {
+			error_log( "Attempted to reset 2FA for current user $user_id - blocked" );
+			return false;
+		}
+		
+		try {
+			// Clear all 2FA settings
+			delete_user_meta( $user_id, Two_Factor_Core::ENABLED_PROVIDERS_USER_META_KEY );
+			delete_user_meta( $user_id, Two_Factor_Core::PROVIDER_USER_META_KEY );
+			delete_user_meta( $user_id, Two_Factor_Totp::SECRET_META_KEY );
+			delete_user_meta( $user_id, Two_Factor_Backup_Codes::BACKUP_CODES_META_KEY );
+			delete_user_meta( $user_id, Two_Factor_Email::TOKEN_META_KEY );
+			delete_user_meta( $user_id, self::USER_2FA_SETUP_FORCED_KEY );
+			
+			// Clear any stored session data for 2FA processes
+			delete_user_meta( $user_id, '_two_factor_session_data' );
+			
+			// Check if 2FA is required for this user
+			$settings = self::get_settings();
+			$should_require_setup = false;
+			
+			if ( isset( $settings['force_2fa'] ) && $settings['force_2fa'] ) {
+				// Check if user role requires 2FA
+				$required_roles = isset( $settings['required_roles'] ) ? $settings['required_roles'] : array();
+				
+				if ( empty( $required_roles ) ) {
+					// Apply to all users
+					$should_require_setup = true;
+				} else {
+					// Check if user has required role
+					$user_roles = $user->roles;
+					$role_match = array_intersect( $user_roles, $required_roles );
+					$should_require_setup = ! empty( $role_match );
+				}
+			}
+			
+			// Mark user as needing 2FA setup if required
+			if ( $should_require_setup ) {
+				update_user_meta( $user_id, self::USER_NEEDS_2FA_SETUP_KEY, true );
+				error_log( "Marked user $user_id as needing 2FA setup after reset" );
+			} else {
+				// Clear the needs setup flag if 2FA is not required
+				delete_user_meta( $user_id, self::USER_NEEDS_2FA_SETUP_KEY );
+				error_log( "Cleared needs setup flag for user $user_id (2FA not required)" );
+			}
+			
+			// More targeted session destruction - only destroy sessions for the specific user
+			// and only if we're not dealing with the current user
+			if ( $user_id !== $current_user_id && function_exists( 'wp_destroy_other_sessions' ) ) {
+				// This is safer - it only destroys other sessions for the target user
+				$sessions = WP_Session_Tokens::get_instance( $user_id );
+				if ( $sessions ) {
+					$sessions->destroy_all();
+					error_log( "Destroyed all sessions for user $user_id" );
+				}
+			}
+			
+			error_log( "Successfully reset 2FA for user $user_id ({$user->user_login})" );
+			return true;
+			
+		} catch ( Exception $e ) {
+			error_log( "Error resetting 2FA for user $user_id: " . $e->getMessage() );
+			return false;
+		}
+	}
+
+	/**
+	 * Display admin notices for 2FA reset actions
+	 */
+	public static function admin_reset_2fa_notices() {
+		// Only show on users.php page
+		$screen = get_current_screen();
+		if ( ! $screen || $screen->id !== 'users' ) {
+			return;
+		}
+		
+		// Check for reset result
+		if ( isset( $_GET['reset_2fa_result'] ) ) {
+			$result = sanitize_text_field( $_GET['reset_2fa_result'] );
+			$user_name = isset( $_GET['reset_user_name'] ) ? sanitize_text_field( $_GET['reset_user_name'] ) : __( 'User', 'two-factor' );
+			
+			if ( $result === 'success' ) {
+				printf(
+					'<div class="notice notice-success is-dismissible"><p>%s</p></div>',
+					sprintf(
+					 __( 'Two-factor authentication has been successfully reset for %s. They will be required to set up 2FA again on their next login.', 'two-factor' ),
+					 '<strong>' . esc_html( $user_name ) . '</strong>'
+					)
+				);
+			} elseif ( $result === 'error' ) {
+				printf(
+					'<div class="notice notice-error is-dismissible"><p>%s</p></div>',
+					sprintf(
+					 __( 'Failed to reset two-factor authentication for %s. Please try again.', 'two-factor' ),
+					 '<strong>' . esc_html( $user_name ) . '</strong>'
+					)
+				);
+			}
+		}
+	}
+
+	/**
+	 * Extend grace period for testing
+	 */
+	public static function extend_grace_period_for_testing( $time, $user_id, $context ) {
+		// For testing: extend grace period to 1 hour
+		return 3600;
+	}
+
+	/**
+	 * Intercept all core 2FA URLs and redirect to our frontend implementation
+	 */
+	public static function intercept_core_2fa_urls() {
+		// Check if this is a wp-login.php 2FA request
+		$is_wp_login_2fa = (
+			isset($_GET['action']) && 
+			in_array($_GET['action'], ['revalidate_2fa', 'validate_2fa']) &&
+			(strpos($_SERVER['REQUEST_URI'], 'wp-login.php') !== false || isset($_GET['loggedout']))
+		);
+		
+		if ($is_wp_login_2fa) {
+			error_log('Intercepting core 2FA URL: ' . $_SERVER['REQUEST_URI']);
+			
+			// Start session to preserve any existing data
+			if (!session_id()) {
+				session_start();
+			}
+			
+			// Preserve redirect_to parameter
+			$redirect_to = isset($_GET['redirect_to']) ? $_GET['redirect_to'] : '';
+			if ($redirect_to) {
+				$_SESSION['two_factor_redirect_to'] = $redirect_to;
+			}
+			
+			// Try to get user from various sources
+			$user = null;
+			
+			// FOR REVALIDATION: Check current logged-in user first
+			if (is_user_logged_in()) {
+				$user = wp_get_current_user();
+				error_log('Found current logged-in user for revalidation: ' . $user->ID);
+			}
+			
+			// Check session for stored user ID
+			if (!$user && isset($_SESSION['email_2fa_user_id'])) {
+				$user = get_user_by('id', $_SESSION['email_2fa_user_id']);
+				error_log('Found user from session: ' . ($user ? $user->ID : 'null'));
+			}
+			
+			// If we have a user, store in session and redirect to our frontend
+			if ($user && $user->ID) {
+				$_SESSION['email_2fa_user_id'] = $user->ID;
+				$_SESSION['two_factor_login_user_id'] = $user->ID;
+				$_SESSION['two_factor_login_timestamp'] = time();
+				
+				error_log('Redirecting core 2FA to frontend for user: ' . $user->ID);
+				wp_redirect(home_url('/account/?action=2fa&two_factor_login=1'));
+				exit;
+			} else {
+				error_log('No user found for core 2FA redirect - redirecting to login');
+				wp_redirect(home_url('/account/'));
+				exit;
+			}
+		}
+	}
+	
+	
+	
+	/**
+	 * Override login URLs to point to our frontend
+	 */
+	public static function override_login_url($login_url, $redirect, $force_reauth) {
+		// If this is a 2FA related login URL, redirect to our frontend
+		if (strpos($login_url, 'action=revalidate_2fa') !== false || 
+			strpos($login_url, 'action=validate_2fa') !== false) {
+			
+			error_log('Overriding login URL: ' . $login_url);
+			
+			$frontend_url = home_url('/account/?action=2fa&two_factor_login=1');
+			if ($redirect) {
+				$frontend_url .= '&redirect_to=' . urlencode($redirect);
+			}
+			
+			return $frontend_url;
+		}
+		
+		return $login_url;
+	}
+
+	/**
+	 * Comprehensive override for all core 2FA actions and URLs
+	 */
+	public static function override_core_2fa_action() {
+		error_log('Overriding core 2FA action: ' . (isset($_GET['action']) ? $_GET['action'] : 'unknown'));
+		
+		// Start session
+		if (!session_id()) {
+			session_start();
+		}
+		
+		// Preserve redirect_to parameter
+		if (isset($_GET['redirect_to'])) {
+			$_SESSION['two_factor_redirect_to'] = $_GET['redirect_to'];
+		}
+		
+		// Try to get user from current session or WordPress
+		$user = wp_get_current_user();
+		if (!$user || !$user->ID) {
+			// Try to get from our session
+			if (isset($_SESSION['email_2fa_user_id'])) {
+				$user = get_user_by('id', $_SESSION['email_2fa_user_id']);
+			}
+		}
+		
+		if ($user && $user->ID) {
+			// Store user in session for our frontend
+			$_SESSION['email_2fa_user_id'] = $user->ID;
+			$_SESSION['two_factor_login_user_id'] = $user->ID;
+			$_SESSION['two_factor_login_timestamp'] = time();
+			
+			error_log('Redirecting to frontend 2FA for user: ' . $user->ID);
+			wp_redirect(home_url('/account/?action=2fa&two_factor_login=1'));
+		} else {
+			error_log('No user found - redirecting to main account page');
+			wp_redirect(home_url('/account/'));
+		}
+		
+		exit;
+	}
+
+	/**
+	 * Force admin access to 2FA options by manipulating the session
+	 */
+	public static function force_admin_2fa_access() {		
+		// Only for administrators
+		if (!current_user_can('manage_options')) {
+			return;
+		}
+		
+		// Check if we're in admin area first
+		if (!is_admin()) {
+			return;
+		}
+		
+		// Add comprehensive debugging
+		error_log('=== Admin 2FA Access Check (current_screen hook) ===');
+		error_log('Current user can manage options: ' . (current_user_can('manage_options') ? 'YES' : 'NO'));
+		error_log('Is admin: ' . (is_admin() ? 'YES' : 'NO'));
+		error_log('Request URI: ' . $_SERVER['REQUEST_URI']);
+		error_log('Current page: ' . (isset($_GET['page']) ? $_GET['page'] : 'none'));
+		
+		// Get screen after it's available
+		$screen = get_current_screen();
+		error_log('Current screen: ' . ($screen ? $screen->id : 'null'));
+		error_log('Current screen base: ' . ($screen ? $screen->base : 'null'));
+		
+		// Enhanced profile page detection
+		$is_profile_page = false;
+		
+		// Method 1: Check screen if available
+		if ($screen) {
+			$profile_screens = ['profile', 'user-edit'];
+			$is_profile_page = in_array($screen->id, $profile_screens) || in_array($screen->base, $profile_screens);
+			error_log('Screen-based detection: ' . ($is_profile_page ? 'YES' : 'NO'));
+		}
+		
+		// Method 2: Check URL patterns (more reliable)
+		if (!$is_profile_page) {
+			$request_uri = $_SERVER['REQUEST_URI'];
+			$is_profile_page = (
+				strpos($request_uri, '/wp-admin/profile.php') !== false ||
+				strpos($request_uri, '/wp-admin/user-edit.php') !== false ||
+				(strpos($request_uri, '/wp-admin/') !== false && isset($_GET['user_id']) && is_numeric($_GET['user_id']))
+			);
+			error_log('URL-based detection: ' . ($is_profile_page ? 'YES' : 'NO'));
+		}
+		
+		// Method 3: Check global variables (most reliable)
+		if (!$is_profile_page) {
+			global $pagenow;
+			$is_profile_page = in_array($pagenow, ['profile.php', 'user-edit.php']);
+			error_log('Global $pagenow detection (' . $pagenow . '): ' . ($is_profile_page ? 'YES' : 'NO'));
+		}
+		
+		if (!$is_profile_page) {
+			error_log('FAILING - Not a profile page (all methods failed)');
+			return;
+		}
+		
+		error_log('SUCCESS - Profile page detected');
+		error_log('Checking 2FA session for admin access');
+		
+		// Check if current user is using 2FA
+		$current_user_id = get_current_user_id();
+		if (!Two_Factor_Core::is_user_using_two_factor($current_user_id)) {
+			error_log('Admin does not have 2FA enabled - no session manipulation needed');
+			return;
+		}
+		
+		$session = Two_Factor_Core::get_current_user_session();
+		error_log('Current session data: ' . print_r($session, true));
+		
+		if (!$session || empty($session['two-factor-login'])) {
+			error_log('Forcing 2FA session for admin access');
+			
+			// Set a recent 2FA login timestamp
+			$update_result = Two_Factor_Core::update_current_user_session(array(
+				'two-factor-login' => time(),
+				'two-factor-provider' => 'admin_override'
+			));
+			
+			error_log('Session update result: ' . ($update_result ? 'SUCCESS' : 'FAILED'));
+			
+			if ($update_result) {
+				error_log('Successfully forced 2FA session metadata for admin');
+			}
+		} else {
+			error_log('Admin already has valid 2FA session: ' . $session['two-factor-login']);
+		}
+	}
+
+	
 }

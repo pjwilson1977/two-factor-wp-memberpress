@@ -9,8 +9,147 @@
 	margin: 0 auto;
 	padding: 20px;
 }
-.two-factor-setup-container p, .two-factor-setup-container ul {
-  font-size: 1.2rem;
+.two-factor-setup-container {
+	max-width: 600px;
+	margin: 0 auto;
+	background: white;
+	padding: 30px;
+	border-radius: 8px;
+	box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+}
+.setup-header {
+	text-align: center;
+	margin-bottom: 30px;
+}
+.setup-header h1 {
+	color: #333;
+	margin-bottom: 10px;
+}
+.setup-header ul {
+	text-align: left;	
+}
+.setup-step {
+	margin-bottom: 20px;
+}
+.setup-step h2 {
+	color: #555;
+	border-bottom: 2px solid #0073aa;
+	padding-bottom: 10px;
+}
+.qr-code {
+	text-align: center;
+	margin: 20px 0;
+}
+.qr-code img {
+	border: 1px solid #ddd;
+	padding: 10px;
+}
+.setup-instructions {
+	background: #f9f9f9;
+	padding: 15px;
+	border-left: 4px solid #0073aa;
+	margin: 20px 0;
+}
+.form-field {
+	margin-bottom: 15px;
+}
+.form-field label {
+	display: block;
+	margin-bottom: 5px;
+	font-weight: 600;
+}
+.form-field input[type="text"] {
+	width: 100%;
+	padding: 10px;
+	border: 1px solid #ddd;
+	border-radius: 4px;
+	font-size: 16px;
+	box-sizing: border-box;
+}
+.btn {
+	background: #0073aa;
+	color: white;
+	padding: 12px 24px;
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 16px;
+	text-decoration: none;
+	display: inline-block;
+}
+.btn:hover {
+	background: #005a87;
+}
+.btn-primary {
+	background: #0073aa;
+}
+.btn-full-width {
+	width: 100%;
+	box-sizing: border-box;
+	text-align: center;
+}
+.btn-secondary {
+	background: #666;
+	margin-left: 10px;
+}
+.btn-secondary:hover {
+	background: #555;
+}
+.two-factor-message.error {
+	background: #f8d7da;
+	color: #721c24;
+	padding: 10px;
+	border: 1px solid #f5c6cb;
+	border-radius: 4px;
+	margin-bottom: 20px;
+}
+.success-message {
+	background: #d4edda;
+	color: #155724;
+	padding: 15px;
+	border: 1px solid #c3e6cb;
+	border-radius: 4px;
+	margin-bottom: 20px;
+	text-align: center;
+}
+.two-factor-backup-codes {
+	background: #fff3cd;
+	border: 1px solid #ffeaa7;
+	padding: 15px;
+	border-radius: 4px;
+	margin: 20px 0;
+}
+.two-factor-backup-codes-list {
+	font-family: monospace;
+	font-size: 14px;
+	list-style: none;
+	padding: 0;
+	columns: 2;
+	margin: 15px 0;
+}
+.two-factor-backup-codes-list li {
+	margin-bottom: 5px;
+	padding: 5px;
+	background: white;
+	border-radius: 3px;
+}
+.progress-bar {
+	background: #f1f1f1;
+	border-radius: 10px;
+	padding: 3px;
+	margin-bottom: 20px;
+}
+.progress-fill {
+	background: #0073aa;
+	height: 10px;
+	border-radius: 8px;
+	transition: width 0.3s ease;
+}
+.two-factor-form {
+	margin-top: 20px;
+}
+.two-factor-setup-container p, .two-factor-setup-container .two-factor-backup-codes-list {
+  text-align: center;
 }
 .two-factor-setup-container .setup-instructions {
     padding: 5px 15px;

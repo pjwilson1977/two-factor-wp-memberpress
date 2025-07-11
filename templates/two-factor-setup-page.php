@@ -8,37 +8,29 @@
  */
 function render_setup_step( $user ) {
 	// Validate user object
-	if ( ! $user || ! $user->ID ) {
-		error_log( 'ERROR: Invalid user object passed to render_setup_step' );
+	if ( ! $user || ! $user->ID ) {		
 		echo '<div class="error-message">Session expired. Please try logging in again.</div>';
 		return;
 	}
 	
-	error_log( 'render_setup_step called with valid user: ' . $user->user_login . ' (ID: ' . $user->ID . ')' );
-	
 	$providers = Two_Factor_Core::get_providers();
-	if ( ! isset( $providers['Two_Factor_Totp'] ) ) {
-		error_log( 'ERROR: TOTP provider not available in render_setup_step' );
+	if ( ! isset( $providers['Two_Factor_Totp'] ) ) {	
 		return;
 	}
 	
 	$totp_provider = $providers['Two_Factor_Totp'];
 	$secret = get_user_meta( $user->ID, Two_Factor_Totp::SECRET_META_KEY, true );
 	
-	if ( ! $secret ) {
-		error_log( 'No secret found in render_setup_step, generating new one for user ' . $user->ID );
+	if ( ! $secret ) {		
 		// Generate new secret if none exists
 		$secret = $totp_provider->generate_key();
-		update_user_meta( $user->ID, Two_Factor_Totp::SECRET_META_KEY, $secret );
-		error_log( 'Generated new secret for user ' . $user->ID . ': ' . substr( $secret, 0, 10 ) . '...' );
+		update_user_meta( $user->ID, Two_Factor_Totp::SECRET_META_KEY, $secret );		
 	} else {
 		error_log( 'Found existing secret for user ' . $user->ID . ': ' . substr( $secret, 0, 10 ) . '...' );
 	}
 	
-	$qr_url = $totp_provider->generate_qr_code_url( $user, $secret );
-	error_log( 'Generated QR URL: ' . $qr_url );
-	$qr_svg_url = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . urlencode( $qr_url );
-	error_log( 'QR SVG URL: ' . $qr_svg_url );
+	$qr_url = $totp_provider->generate_qr_code_url( $user, $secret );	
+	$qr_svg_url = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' . urlencode( $qr_url );	
 	?>
 	<div class="setup-step">
 		<div class="setup-header">
@@ -66,8 +58,10 @@ function render_setup_step( $user ) {
 				$site_name = get_bloginfo( 'name', 'display' );
 				$user_identifier = ! empty( $user->user_email ) ? $user->user_email : ( ! empty( $user->display_name ) ? $user->display_name : $user->user_login );
 				?>
+				<!--
 				<p><strong><?php _e( 'Expected account name in your app:', 'two-factor' ); ?></strong><br>
 				<?php echo esc_html( $site_name . ':' . $user_identifier ); ?></p>
+				-->
 			</div>
 
 			<form method="get" action="" class="two-factor-form">
@@ -77,7 +71,7 @@ function render_setup_step( $user ) {
 				<p>
 					<input type="submit" 
 						   class="btn btn-primary btn-full-width" 
-						   value="<?php esc_attr_e( 'I\'ve Added the Account to My App', 'two-factor' ); ?>" />
+						   value="<?php esc_attr_e( 'I\'ve Added the Account to my Authenticator App', 'two-factor' ); ?>" />
 				</p>
 			</form>
 		</div>
@@ -327,8 +321,6 @@ if ( ! $user || ! $user->ID ) {
 
 $step = isset( $_GET['step'] ) ? sanitize_text_field( $_GET['step'] ) : 'setup';
 
-// Debug user information
-error_log( 'Template - User ID: ' . $user->ID . ', Login: ' . $user->user_login . ', Email: ' . $user->user_email );
 ?>
 <!DOCTYPE html>
 <html <?php language_attributes(); ?>>
@@ -343,143 +335,11 @@ error_log( 'Template - User ID: ' . $user->ID . ', Login: ' . $user->user_login 
 			background: #f1f1f1;
 			margin: 0;
 			padding: 20px;
+			font-size: 1.2rem !important;
 		}
-		.two-factor-setup-container {
-			max-width: 500px;
-			margin: 0 auto;
-			background: white;
-			padding: 30px;
-			border-radius: 8px;
-			box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-		}
-		.setup-header {
-			text-align: center;
-			margin-bottom: 30px;
-		}
-		.setup-header h1 {
-			color: #333;
-			margin-bottom: 10px;
-		}
-		.setup-step {
-			margin-bottom: 20px;
-		}
-		.setup-step h2 {
-			color: #555;
-			border-bottom: 2px solid #0073aa;
-			padding-bottom: 10px;
-		}
-		.qr-code {
-			text-align: center;
-			margin: 20px 0;
-		}
-		.qr-code img {
-			border: 1px solid #ddd;
-			padding: 10px;
-		}
-		.setup-instructions {
-			background: #f9f9f9;
-			padding: 15px;
-			border-left: 4px solid #0073aa;
-			margin: 20px 0;
-		}
-		.form-field {
-			margin-bottom: 15px;
-		}
-		.form-field label {
-			display: block;
-			margin-bottom: 5px;
-			font-weight: 600;
-		}
-		.form-field input[type="text"] {
-			width: 100%;
-			padding: 10px;
-			border: 1px solid #ddd;
-			border-radius: 4px;
-			font-size: 16px;
-			box-sizing: border-box;
-		}
-		.btn {
-			background: #0073aa;
-			color: white;
-			padding: 12px 24px;
-			border: none;
-			border-radius: 4px;
-			cursor: pointer;
-			font-size: 16px;
-			text-decoration: none;
-			display: inline-block;
-		}
-		.btn:hover {
-			background: #005a87;
-		}
-		.btn-primary {
-			background: #0073aa;
-		}
-		.btn-full-width {
-			width: 100%;
-			box-sizing: border-box;
-			text-align: center;
-		}
-		.btn-secondary {
-			background: #666;
-			margin-left: 10px;
-		}
-		.btn-secondary:hover {
-			background: #555;
-		}
-		.two-factor-message.error {
-			background: #f8d7da;
-			color: #721c24;
-			padding: 10px;
-			border: 1px solid #f5c6cb;
-			border-radius: 4px;
-			margin-bottom: 20px;
-		}
-		.success-message {
-			background: #d4edda;
-			color: #155724;
-			padding: 15px;
-			border: 1px solid #c3e6cb;
-			border-radius: 4px;
-			margin-bottom: 20px;
-			text-align: center;
-		}
-		.two-factor-backup-codes {
-			background: #fff3cd;
-			border: 1px solid #ffeaa7;
-			padding: 15px;
-			border-radius: 4px;
-			margin: 20px 0;
-		}
-		.two-factor-backup-codes-list {
-			font-family: monospace;
-			font-size: 14px;
-			list-style: none;
-			padding: 0;
-			columns: 2;
-			margin: 15px 0;
-		}
-		.two-factor-backup-codes-list li {
-			margin-bottom: 5px;
-			padding: 5px;
-			background: white;
-			border-radius: 3px;
-		}
-		.progress-bar {
-			background: #f1f1f1;
-			border-radius: 10px;
-			padding: 3px;
-			margin-bottom: 20px;
-		}
-		.progress-fill {
-			background: #0073aa;
-			height: 10px;
-			border-radius: 8px;
-			transition: width 0.3s ease;
-		}
-		.two-factor-form {
-			margin-top: 20px;
-		}
+		
+		
+		
 	</style>
 </head>
 <body>
